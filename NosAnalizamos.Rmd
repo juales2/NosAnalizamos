@@ -3,9 +3,10 @@ title: "NosAnalizamos"
 author: "Julián Alcázar"
 date: "2026-05-24"
 output:
+  pdf_document:
+    latex_engine: xelatex
   html_document:
     df_print: paged
-  pdf_document: default
 ---
 
 ```{r setup, include=FALSE}
@@ -23,10 +24,10 @@ El objetivo de este script es realizar el procesamiento, la depuración y el an�
 Cargamos el fichero de datos omitiendo las cabeceras descriptivas iniciales. La lectura se realiza de forma automática a partir de la fila 25, donde se detecta la estructura tabular auténtica de los datos.
 
 ```{r}
-# Ruta del archivo a procesar (puedes cambiar "2022" por "2026" para actualizar los resultados)
+FICHERO_DATOS <- "data/NosAutoanalizamos2022 - Hoja1.tsv"
+
 FICHERO_DATOS <- "data/NosAutoanalizamos2026 - NosAutoanalizamos (1).tsv"
 
-# Identificar de forma dinámica dónde empiezan los datos buscando la cabecera real
 lineas <- readLines(FICHERO_DATOS, warn = FALSE)
 fila_cabecera <- grep("FechaNac|FechaNac\\(DD-MM-YYY\\)", lineas)
 
@@ -47,6 +48,7 @@ datos <- datos %>%
 
 message(paste("Registros de alumnos cargados automáticamente:", nrow(datos)))
 ```
+(n=62 alumnos, FP solo tiene 20 registros — muchos no se presentaron)
 
 ## 2. Limpieza de Calificaciones
 
@@ -75,9 +77,9 @@ calificaciones_clean <- datos %>%
   mutate(
     ALG = limpiar_calificacion(ALG),
     ANM = limpiar_calificacion(ANM),
-    FP  = limpiar_calificacion(FP),
+    FP = limpiar_calificacion(FP),
     DCS = limpiar_calificacion(DCS),
-    MD  = limpiar_calificacion(MD)
+    MD = limpiar_calificacion(MD)
   )
 
 # Exportar las calificaciones depuradas al archivo requerido en el examen
@@ -214,7 +216,7 @@ calificaciones_sexo %>%
        x = "Asignatura",
        y = "Calificación",
        fill = "Sexo") +
-  scale_fill_manual(values = c("F" = "#ff7f0e", "M" = "#1f77b4")) +
+  scale_fill_manual(values = c("F" = "orange", "M" = "blue")) +
   theme_minimal()
 ```
 
@@ -251,3 +253,61 @@ ggplot(alumnos_completos_long,
     size = 9
   ))
 ```
+
+# Respuestas preguntas 2026 (n=60 alumnos)
+
+## 1. ¿Qué edad tiene el alumno más joven a 01/02/2026?
+
+- gipicar, nacido el 19-12-2007 → 18,12 años
+
+## 2. ¿Cuántos alumnos simultanean trabajo y estudios?
+
+- 14 alumnos (Hwork > 0)
+
+## 3. ¿Hay más hombres o mujeres fumadoras?
+
+- Fumadores: 7 hombres, 0 mujeres. Hay más hombres fumadores (de hecho solo fuman hombres en este grupo)
+
+## 4. Media y varianza de Wr.Hnd según sexo:
+
+Sexo:
+  Mujer:
+    Media: 18.04
+    Varianza:  3.72
+  Hombre:
+    Media: 19.99
+    Varianza: 1.73
+    
+## 5. ¿Existe relación entre sexo y NW.Hnd?
+
+Sexo:
+  Mujer:
+    Derecha: 22
+    Izquierda: 2
+  Hombre:
+    Derecha: 29
+    Izquierda: 7
+    
+Se debe aplicar un test χ²: la proporción de zurdos es similar entre sexos (~8% F vs ~19% M). Con n pequeña la evidencia es débil; no hay evidencia clara de relación entre sexo y mano dominante en este grupo.
+
+## 6. ¿Existe relación lineal entre Height y Wr.Hnd?ç
+
+- Correlación de Pearson = 0,43; correlación positiva moderada. Existe cierta relación lineal (personas más altas tienden a tener manos más grandes), pero no es muy fuerte.
+
+## 7. ¿Hampel detecta outliers en Height?
+
+- Mediana = 173,5 cm, MADM = 10,38; Límites: [142,4 ; 204,6]
+- No se detecta ningún outlier en la variable altura.
+
+## 8. Valor para imputación generalizada de FP (media):
+
+- Media FP (2026) = 4,40 (sobre 17 alumnos con nota válida)
+
+## 9. Imputación de FP por PulseCat (casos similares):
+
+- A los alumnos sin nota de FP: si tienen PulseH se imputa 5,10, si tienen PulseL se imputa 4,14
+
+## 10. ¿Qué decimos ante "el ritmo cardíaco tiene relación lineal con ALG"?
+- Correlación Pearson(Pulse, ALG) = 0,14; correlación muy débil, prácticamente nula.
+
+Los datos muestran que no existe relación lineal apreciable entre el ritmo cardíaco y las calificaciones en ALG. Además, correlación no implica causalidad — aunque existiera, necesitaríamos un diseño experimental controlado para establecer una relación causal.
