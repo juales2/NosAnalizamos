@@ -1,0 +1,253 @@
+---
+title: "NosAnalizamos"
+author: "Julián Alcázar"
+date: "2026-05-24"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# Instalación automática y carga de dependencias mediante pacman
+if (!require("pacman"))
+  install.packages("pacman")
+pacman::p_load(tidyverse, readr, GGally, ggplot2, knitr, class)
+```
+
+## 1. Introducción y Carga Automática de Datos
+
+El objetivo de este script es realizar el procesamiento, la depuración y el análisis estadístico descriptivo del conjunto de datos del curso. El diseño permite conmutar la fuente de datos modificando únicamente la constante del fichero de entrada.
+
+Cargamos el fichero de datos omitiendo las cabeceras descriptivas iniciales. La lectura se realiza de forma automática a partir de la fila 25, donde se detecta la estructura tabular auténtica de los datos.
+
+```{r}
+# Ruta del archivo a procesar (puedes cambiar "2022" por "2026" para actualizar los resultados)
+FICHERO_DATOS <- "data/NosAutoanalizamos2026 - NosAutoanalizamos (1).tsv"
+
+# Identificar de forma dinámica dónde empiezan los datos buscando la cabecera real
+lineas <- readLines(FICHERO_DATOS, warn = FALSE)
+fila_cabecera <- grep("FechaNac|FechaNac\\(DD-MM-YYY\\)", lineas)
+
+if (length(fila_cabecera) == 0) {
+  stop("No se ha encontrado la fila de cabecera en el archivo tsv.")
+}
+
+# Lectura del set de datos a partir de la fila identificada
+datos_raw <- read_tsv(FICHERO_DATOS, skip = fila_cabecera - 1, show_col_types = FALSE)
+
+# Filtrar filas vacías o registros inconsistentes que carecen de identificador de alumno (Id)
+datos <- datos_raw %>%
+  filter(!is.na(Id) & Id != "" & !is.na(`FechaNac(DD-MM-YYY)`))
+
+# Eliminar el registro del tutor o de ejemplo ('martsobm')
+datos <- datos %>%
+  filter(Id != "martsobm")
+
+message(paste("Registros de alumnos cargados automáticamente:", nrow(datos)))
+```
+
+## 2. Limpieza de Calificaciones
+
+La variable de calificaciones contiene anomalías y diferentes formatos. Homogeneizamos los datos transformando el separador decimal a punto, sustituyendo "NC" por un valor de 3, y convirtiendo cualquier otra inconsistencia textual o no presentada en NA.
+
+```{r}
+limpiar_calificacion <- function(columna) {
+  # Convertir a carácter y limpiar espacios
+  col_char <- str_trim(as.character(columna))
+  
+  # Reemplazar 'NC' por la nota compensable estándar (3)
+  col_char[col_char == "NC"] <- "3"
+  col_char[col_char %in% c("NP", "NA", "NC", "")] <- NA
+  
+  # Sustituir comas por puntos decimales
+  col_char <- str_replace(col_char, ",", ".")
+  
+  # Forzar transformación a numérico (valores erróneos de texto se convertirán en NA)
+  col_num <- suppressWarnings(as.numeric(col_char))
+  return(col_num)
+}
+
+# Aplicar la función de limpieza a las variables de asignaturas
+calificaciones_clean <- datos %>%
+  select(Id, Sex, Pulse, Height, Wr.Hnd, ALG, ANM, FP, DCS, MD) %>%
+  mutate(
+    ALG = limpiar_calificacion(ALG),
+    ANM = limpiar_calificacion(ANM),
+    FP  = limpiar_calificacion(FP),
+    DCS = limpiar_calificacion(DCS),
+    MD  = limpiar_calificacion(MD)
+  )
+
+# Exportar las calificaciones depuradas al archivo requerido en el examen
+save(calificaciones_clean, file = "Notas.Rdata")
+```
+
+## 3. Tabla de Estadísticos Descriptivos
+
+Obtenemos un resumen de medidas descriptivas de tendencia central y dispersión para cada una de las asignaturas. Los resultados se formatean a dos decimales de precisión.
+
+```{r}
+estadisticos_asignaturas <- calificaciones_clean %>%
+  select(ALG, ANM, FP, DCS, MD) %>%
+  pivot_longer(cols = everything(),
+               names_to = "Asignatura",
+               values_to = "Nota") %>%
+  group_by(Asignatura) %>%
+  summarise(
+    `Mínimo` = round(min(Nota, na.rm = TRUE), 2),
+    `Percentil 25` = round(quantile(Nota, probs = 0.25, na.rm = TRUE), 2),
+    `Mediana` = round(median(Nota, na.rm = TRUE), 2),
+    `Media` = round(mean(Nota, na.rm = TRUE), 2),
+    `Desv. Típica` = round(sd(Nota, na.rm = TRUE), 2),
+    `Percentil 75` = round(quantile(Nota, probs = 0.75, na.rm = TRUE), 2),
+    `Máximo` = round(max(Nota, na.rm = TRUE), 2)
+  )
+
+kable(estadisticos_asignaturas, caption = "Estadísticos de Calificaciones del Curso")
+```
+
+## 4. Análisis de Relaciones Bivariantes y Correlación
+
+# Matriz de Dispersión Cruzada (ggpairs)
+
+Utilizamos la librería GGally para visualizar la distribución conjunta y los coeficientes de correlación entre las asignaturas del cuatrimestre.
+
+Al haber usuarios que poseen datos no finitos se considera hacer dos estudios; uno con dichos datos y otro sin ellos.
+
+```{r}
+ggpairs(
+  calificaciones_clean,
+  columns = c("ALG", "ANM", "FP", "DCS", "MD"),
+  title = "Relación Lineal de Rendimiento entre Asignaturas",
+  upper = list(continuous = wrap(
+    "cor", method = "pearson", size = 4.5
+  )),
+  lower = list(continuous = wrap(
+    "points", alpha = 0.6, size = 1.5
+  ))
+) +
+  theme_minimal()
+
+calificaciones_clean %>%
+  select(ALG, ANM, FP, DCS, MD) %>%
+  na.omit() %>%  # Elimina temporalmente las filas con NA solo para la visualización
+  ggpairs(
+    title = "Relación Lineal de Rendimiento entre Asignaturas",
+    upper = list(continuous = wrap(
+      "cor", method = "pearson", size = 4.5
+    )),
+    lower = list(continuous = wrap(
+      "points", alpha = 0.6, size = 1.5
+    ))
+  ) +
+  theme_minimal()
+```
+
+# Matrices de Correlación (Pearson vs Spearman)
+
+```{r}
+notas_matriz <- calificaciones_clean %>%
+  select(ALG, ANM, FP, DCS, MD) %>%
+  na.omit()
+
+# Correlación de Pearson
+cor_pearson <- cor(notas_matriz, method = "pearson")
+# Correlación de Spearman
+cor_spearman <- cor(notas_matriz, method = "spearman")
+
+cat("Matriz de Correlación de Pearson:\n")
+print(round(cor_pearson, 2))
+
+cat("\nMatriz de Correlación de Spearman:\n")
+print(round(cor_spearman, 2))
+```
+
+## 5. Visualizaciones de Rendimiento Académico
+
+# Representación Boxplot General
+
+Comparamos la distribución de notas obtenidas de forma global en las cinco áreas evaluadas.
+
+```{r}
+calificaciones_clean %>%
+  select(ALG, ANM, FP, DCS, MD) %>%
+  pivot_longer(cols = everything(),
+               names_to = "Asignatura",
+               values_to = "Nota") %>%
+  filter(!is.na(Nota)) %>%
+  ggplot(aes(x = Asignatura, y = Nota, fill = Asignatura)) +
+  geom_boxplot(
+    alpha = 0.7,
+    outlier.colour = "red",
+    outlier.shape = 16
+  ) +
+  labs(title = "Distribución de Calificaciones por Asignatura", x = "Asignatura", y = "Calificación") +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+# Distribución de Calificaciones por Sexo
+
+Añadimos la variable de clasificación por sexo para analizar diferencias de rendimiento académico grupal.
+
+```{r}
+# Normalización del etiquetado de Sexo (M y F)
+calificaciones_sexo <- calificaciones_clean %>%
+  mutate(Sex = case_when(
+    Sex %in% c("M", "Masculino") ~ "M",
+    Sex %in% c("F", "Femenino") ~ "F",
+    TRUE ~ NA_character_
+  )) %>%
+  filter(!is.na(Sex))
+
+calificaciones_sexo %>%
+  select(Sex, ALG, ANM, FP, DCS, MD) %>%
+  pivot_longer(cols = -Sex,
+               names_to = "Asignatura",
+               values_to = "Nota") %>%
+  filter(!is.na(Nota)) %>%
+  ggplot(aes(x = Asignatura, y = Nota, fill = Sex)) +
+  geom_boxplot(alpha = 0.7) +
+  labs(title = "Distribución de Calificaciones por Asignatura y Sexo",
+       x = "Asignatura",
+       y = "Calificación",
+       fill = "Sexo") +
+  scale_fill_manual(values = c("F" = "#ff7f0e", "M" = "#1f77b4")) +
+  theme_minimal()
+```
+
+# Evolución de Alumnos con Calificaciones Completas
+
+Filtramos para conservar únicamente a los estudiantes que tienen registro de notas en la totalidad de las asignaturas. Representamos su evolución académica individualizada.
+
+```{r}
+alumnos_completos <- calificaciones_clean %>%
+  filter(!is.na(ALG) &
+           !is.na(ANM) & !is.na(FP) & !is.na(DCS) & !is.na(MD))
+
+alumnos_completos_long <- alumnos_completos %>%
+  select(Id, ALG, ANM, FP, DCS, MD) %>%
+  pivot_longer(cols = -Id,
+               names_to = "Asignatura",
+               values_to = "Nota")
+
+ggplot(alumnos_completos_long,
+       aes(
+         x = Id,
+         y = Nota,
+         group = Asignatura,
+         color = Asignatura
+       )) +
+  geom_line(linewidth = 0.8, alpha = 0.8) +
+  geom_point(size = 2.5) +
+  labs(title = "Perfil Académico de Alumnos con Evaluación Completa", x = "ID del Alumno", y = "Calificación") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(
+    angle = 90,
+    vjust = 0.5,
+    hjust = 1,
+    size = 9
+  ))
+```
